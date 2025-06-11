@@ -704,8 +704,9 @@ class FileDeleterApp(QWidget):
         # Update quarantine tab first
         self.quarantine_tab.populate_quarantined_files()
         
-        # Separate empty folders from regular files
+        # Separate empty folders, duplicates, and regular files
         empty_folders = []
+        duplicates = []
         regular_files = []
         
         for file_data in restored_files:
@@ -720,31 +721,41 @@ class FileDeleterApp(QWidget):
             logging.info(f"  - Is directory: {is_directory}")
             logging.info(f"  - Full data: {file_data}")
             
-            # Empty folder detection - primarily by category, secondarily by being a directory
+            # Classification logic
             if category == 'Empty Folders' or (is_directory and not category):
                 empty_folders.append(file_data)
                 logging.info(f"RESTORATION: ✓ Classified as empty folder: {path}")
+            elif category == 'Duplicates' or 'duplicate' in category.lower():
+                duplicates.append(file_data)
+                logging.info(f"RESTORATION: ✓ Classified as duplicate: {path}")
             else:
                 regular_files.append(file_data)
                 logging.info(f"RESTORATION: ✓ Classified as regular file: {path}")
         
-        logging.info(f"RESTORATION: Found {len(empty_folders)} empty folders and {len(regular_files)} regular files")
+        logging.info(f"RESTORATION: Found {len(empty_folders)} empty folders, {len(duplicates)} duplicates, and {len(regular_files)} regular files")
         
         # Handle empty folder restoration separately
         if empty_folders:
             logging.info(f"RESTORATION: Processing {len(empty_folders)} empty folders for restoration")
             self.handle_empty_folder_restoration(empty_folders)
         
+        # Handle duplicate restoration separately
+        if duplicates:
+            logging.info(f"RESTORATION: Processing {len(duplicates)} duplicates for restoration")
+            self.handle_duplicate_restoration(duplicates)
+        
         # Handle regular file restoration with Smart Cleaner scan+refresh
         if regular_files:
             logging.info(f"RESTORATION: Processing {len(regular_files)} regular files for restoration")
             self.handle_regular_file_restoration(regular_files)
         
-        # If only empty folders were restored, ensure status is updated properly
-        if empty_folders and not regular_files:
-            # Give the restoration scan a moment to start, then update status if needed
-            logging.info(f"RESTORATION: Only empty folders restored ({len(empty_folders)}), ensuring scan is triggered")
-            # The status will be updated by the restoration handler
+        # Update status for special cases
+        if empty_folders and not regular_files and not duplicates:
+            logging.info(f"RESTORATION: Only empty folders restored ({len(empty_folders)})")
+        elif duplicates and not regular_files and not empty_folders:
+            logging.info(f"RESTORATION: Only duplicates restored ({len(duplicates)})")
+        elif empty_folders and duplicates and not regular_files:
+            logging.info(f"RESTORATION: Empty folders and duplicates restored ({len(empty_folders)} + {len(duplicates)})")
 
     def handle_empty_folder_restoration(self, empty_folders):
         """Handle restoration of empty folders by triggering Empty Folder Finder scan only"""
@@ -800,6 +811,44 @@ class FileDeleterApp(QWidget):
                     self.empty_tab.refresh_visual_highlighting()
         else:
             logging.error("RESTORATION: ✗ Empty folder tab not available!")
+
+    def handle_duplicate_restoration(self, duplicates):
+        """Handle restoration of duplicates by triggering Duplicate Finder scan only"""
+        logging.info(f"RESTORATION: Handling {len(duplicates)} duplicates - triggering Duplicate Finder scan only")
+        
+        # Only trigger duplicate scan, NOT Smart Cleaner scan
+        has_dupe_tab = hasattr(self, 'dupe_tab') and self.dupe_tab
+        logging.info(f"RESTORATION: Duplicate tab available: {has_dupe_tab}")
+        
+        if has_dupe_tab:
+            # Check if we have a valid scan path (duplicates use same path as Smart Cleaner)
+            current_scan_path = self.get_scan_path()
+            logging.info(f"RESTORATION: Current scan path for duplicates: '{current_scan_path}'")
+            
+            if current_scan_path and os.path.exists(current_scan_path):
+                logging.info(f"RESTORATION: ✓ Valid path found, triggering duplicate scan on: {current_scan_path}")
+                # Set status to show we're scanning for restored duplicates
+                self.status_label.setText(f"Scanning for restored duplicates in {current_scan_path}...")
+                
+                # Force trigger the scan - same as clicking "Scan for Duplicates" button
+                try:
+                    logging.info("RESTORATION: About to call start_restoration_scan() for duplicates...")
+                    self.dupe_tab.start_restoration_scan()
+                    logging.info("RESTORATION: ✓ Duplicate scan successfully triggered")
+                except Exception as e:
+                    logging.error(f"RESTORATION: ✗ Failed to trigger duplicate scan: {e}")
+                    import traceback
+                    logging.error(f"RESTORATION: Exception traceback: {traceback.format_exc()}")
+                    # Fallback: show message to user
+                    self.status_label.setText(f"Restoration complete. Please click 'Scan for Duplicates' to see restored files.")
+            else:
+                logging.warning(f"RESTORATION: ✗ Cannot determine valid scan path for duplicate restoration")
+                logging.warning(f"RESTORATION: Current path: '{current_scan_path}', exists: {os.path.exists(current_scan_path) if current_scan_path else False}")
+                self.status_label.setText(f"Restoration complete. {len(duplicates)} duplicates restored. Please set scan path and rescan to see them.")
+                if hasattr(self.dupe_tab, 'refresh_visual_highlighting'):
+                    self.dupe_tab.refresh_visual_highlighting()
+        else:
+            logging.error("RESTORATION: ✗ Duplicate tab not available!")
 
     def handle_regular_file_restoration(self, regular_files):
         """Handle restoration of regular files with Smart Cleaner scan+refresh"""

@@ -3,7 +3,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QTreeView, QSplitter, QHBoxLayout, QMessageBox, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
-from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor
+import os
+import logging
 
 from core.duplicate_finder import DuplicateFinderWorker
 from ui.preview_panel import PreviewPanel
@@ -95,7 +97,31 @@ class DuplicateFinderTab(QWidget):
 
     def on_scan_finished(self):
         self.set_ui_enabled(True)
-        self.status_label.setText("Duplicate scan finished.")
+        
+        # Check if this scan was triggered by restoration
+        if hasattr(self, '_restoration_scan_active') and self._restoration_scan_active:
+            self._restoration_scan_active = False
+            
+            # Count restored duplicates for feedback
+            restored_count = 0
+            for i in range(self.model.rowCount()):
+                parent_item = self.model.item(i)
+                if parent_item:
+                    for j in range(parent_item.rowCount()):
+                        name_item = parent_item.child(j, 0)
+                        if name_item and name_item.foreground().color().name() == '#00ff00':  # Green text
+                            restored_count += 1
+            
+            if restored_count > 0:
+                self.main_window.update_status(f"Restoration scan complete. Found duplicate sets ({restored_count} restored duplicates highlighted in green).")
+            else:
+                self.main_window.update_status("Restoration scan complete. No restored duplicates found in current duplicate sets.")
+        else:
+            # Regular scan feedback
+            self.status_label.setText("Duplicate scan finished.")
+        
+        # Refresh highlighting after scan completes (for restoration cases)
+        self.refresh_visual_highlighting()
 
     def populate_tree(self, duplicates):
         self.model.clear()
@@ -118,6 +144,19 @@ class DuplicateFinderTab(QWidget):
                 path_item.setEditable(False)
                 size_item.setEditable(False)
                 
+                # Apply visual highlighting for restored duplicates (green text)
+                normalized_path = os.path.normpath(file_path)
+                if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
+                    logging.info(f"Visual highlighting: Applying green text to restored duplicate {file_path}")
+                    name_item.setForeground(QColor(0, 255, 0))  # Green text for restored duplicates
+                    path_item.setForeground(QColor(0, 255, 0))
+                    size_item.setForeground(QColor(0, 255, 0))
+                else:
+                    # Set default text color for normal duplicates (white for dark theme)
+                    name_item.setForeground(QColor(255, 255, 255))
+                    path_item.setForeground(QColor(255, 255, 255))
+                    size_item.setForeground(QColor(255, 255, 255))
+                
                 name_item.setData(file_path, Qt.ItemDataRole.UserRole)
                 parent_item.appendRow([name_item, path_item, size_item])
 
@@ -125,6 +164,43 @@ class DuplicateFinderTab(QWidget):
             
         self.main_window.resize_tree_columns(self.tree)
         self.status_label.setText(f"Found {len(duplicates)} sets of duplicate files.")
+
+    def refresh_visual_highlighting(self):
+        """Refresh visual highlighting for all displayed duplicates"""
+        for i in range(self.model.rowCount()):
+            parent_item = self.model.item(i)
+            if parent_item:
+                # Check each child file in the duplicate set
+                for j in range(parent_item.rowCount()):
+                    name_item = parent_item.child(j, 0)  # Name column
+                    path_item = parent_item.child(j, 1)  # Path column
+                    size_item = parent_item.child(j, 2)  # Size column
+                    
+                    if name_item and path_item:
+                        file_path = name_item.data(Qt.ItemDataRole.UserRole)
+                        if file_path:
+                            normalized_path = os.path.normpath(file_path)
+                            
+                            # Check for restoration highlighting (green text)
+                            if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
+                                logging.info(f"Visual highlighting: Applying green text to restored duplicate {file_path}")
+                                name_item.setForeground(QColor(0, 255, 0))  # Green text for restored duplicates
+                                path_item.setForeground(QColor(0, 255, 0))
+                                if size_item:
+                                    size_item.setForeground(QColor(0, 255, 0))
+                            else:
+                                # Normal white text for regular duplicates
+                                name_item.setForeground(QColor(255, 255, 255))
+                                path_item.setForeground(QColor(255, 255, 255))
+                                if size_item:
+                                    size_item.setForeground(QColor(255, 255, 255))
+
+    def start_restoration_scan(self):
+        """Start a duplicate scan specifically for restoration purposes"""
+        logging.info("RESTORATION: Starting duplicate restoration scan")
+        self._restoration_scan_active = True
+        self.start_scan()
+        logging.info("RESTORATION: start_scan() method called successfully for duplicates")
 
     def on_selection_changed(self, selected, deselected):
         indexes = selected.indexes()
@@ -149,7 +225,13 @@ class DuplicateFinderTab(QWidget):
                         size = os.path.getsize(path)
                     except OSError:
                         size = 0
-                    items_to_delete.append({'path': path, 'size': size})
+                    items_to_delete.append({
+                        'path': path, 
+                        'size': size,
+                        'category': 'Duplicates',  # Mark as duplicate for restoration tracking
+                        'type': 'file',
+                        'name': os.path.basename(path)
+                    })
         return items_to_delete
 
     def request_deletion(self):
