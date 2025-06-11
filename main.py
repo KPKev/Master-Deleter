@@ -119,6 +119,22 @@ class FileDeleterApp(QWidget):
     def save_recovery_state(self):
         """Save current application state for crash recovery"""
         try:
+            # Convert QDateTime objects and other non-serializable objects to strings for JSON serialization
+            safe_schedule_settings = {}
+            for key, value in self.schedule_settings.items():
+                try:
+                    if hasattr(value, 'toString'):  # QDateTime object
+                        safe_schedule_settings[key] = value.toString('yyyy-MM-dd hh:mm:ss')
+                    elif hasattr(value, 'isoformat'):  # Python datetime
+                        safe_schedule_settings[key] = value.isoformat()
+                    else:
+                        # Test if the value is JSON serializable
+                        json.dumps(value)
+                        safe_schedule_settings[key] = value
+                except (TypeError, ValueError) as e:
+                    logging.warning(f"Skipping non-serializable schedule setting '{key}': {type(value)} - {e}")
+                    safe_schedule_settings[key] = str(value)  # Convert to string as fallback
+            
             state = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "current_tab": self.tabs.currentIndex(),
@@ -126,7 +142,7 @@ class FileDeleterApp(QWidget):
                 "has_categorized_data": bool(self.categorized_data),
                 "category_count": sum(len(data.get('items', [])) for data in self.categorized_data.values()),
                 "exclusions": self.exclusions.copy(),
-                "schedule_settings": self.schedule_settings.copy(),
+                "schedule_settings": safe_schedule_settings,
                 "ui_state": {
                     "window_geometry": [self.x(), self.y(), self.width(), self.height()],
                     "current_theme": getattr(self, 'saved_theme', 'Futuristic Dark')
@@ -139,8 +155,12 @@ class FileDeleterApp(QWidget):
             self.last_state_save = time.time()
             logging.debug("Recovery state saved successfully")
             
+        except TypeError as e:
+            logging.error(f"Failed to save recovery state - JSON serialization error: {e}")
+            logging.error("This likely indicates a non-serializable object in the state data")
         except Exception as e:
             logging.error(f"Failed to save recovery state: {e}")
+            logging.error(f"Error type: {type(e).__name__}")
 
     def attempt_crash_recovery(self):
         """Attempt to recover from a previous crash"""
@@ -149,8 +169,18 @@ class FileDeleterApp(QWidget):
                 logging.info("No previous state found - clean start")
                 return
                 
-            with open(self.app_state_file, 'r') as f:
-                state = json.load(f)
+            # Try to load the state file, handle corruption gracefully
+            try:
+                with open(self.app_state_file, 'r') as f:
+                    state = json.load(f)
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.warning(f"Recovery state file is corrupted: {e}")
+                logging.info("Removing corrupted recovery file and starting fresh")
+                try:
+                    os.remove(self.app_state_file)
+                except Exception as remove_error:
+                    logging.error(f"Could not remove corrupted recovery file: {remove_error}")
+                return
                 
             # Check if state is recent (within last hour)
             state_time = datetime.datetime.fromisoformat(state["timestamp"])
