@@ -80,6 +80,7 @@ class DuplicateFinderTab(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder to Scan for Duplicates")
         if folder:
             self.path_input.setText(folder)
+            logging.info(f"Duplicate finder path set to: {folder}")
 
     def start_scan(self):
         start_path = self.path_input.text()
@@ -87,24 +88,50 @@ class DuplicateFinderTab(QWidget):
             QMessageBox.warning(self, "Invalid Path", "Please select a valid folder to scan for duplicates.")
             return
 
+        # Stop any existing scan
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.stop()
+        if hasattr(self, 'worker_thread') and self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.quit()
+            self.worker_thread.wait(1000)  # Wait up to 1 second
+
         self.set_ui_enabled(False)
         self.status_label.setText(f"Scanning for duplicates in {start_path}...")
         self.model.clear()
         
-        self.worker_thread = QThread()
-        self.worker = DuplicateFinderWorker(start_path, self.main_window.exclusions)
-        self.worker.moveToThread(self.worker_thread)
+        try:
+            self.worker_thread = QThread()
+            self.worker = DuplicateFinderWorker(start_path, self.main_window.exclusions)
+            self.worker.moveToThread(self.worker_thread)
 
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker.scan_finished.connect(self.on_scan_finished)
-        self.worker.progress_update.connect(self.update_status)
-        self.worker.duplicates_found.connect(self.populate_tree)
+            # Connect signals with error handling
+            self.worker_thread.started.connect(self.worker.run)
+            self.worker.scan_finished.connect(self.on_scan_finished)
+            self.worker.progress_update.connect(self.update_status)
+            self.worker.duplicates_found.connect(self.populate_tree)
 
-        self.worker.scan_finished.connect(self.worker_thread.quit)
-        self.worker.scan_finished.connect(self.worker.deleteLater)
-        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-        
-        self.worker_thread.start()
+            # Cleanup connections
+            self.worker.scan_finished.connect(self.worker_thread.quit)
+            self.worker.scan_finished.connect(lambda: self.cleanup_worker())
+            self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+            
+            logging.info(f"Starting duplicate scan on path: {start_path}")
+            self.worker_thread.start()
+            
+        except Exception as e:
+            logging.error(f"Failed to start duplicate scan: {e}")
+            self.set_ui_enabled(True)
+            self.status_label.setText("Failed to start duplicate scan.")
+            QMessageBox.critical(self, "Scan Error", f"Failed to start duplicate scan: {e}")
+
+    def cleanup_worker(self):
+        """Clean up worker references"""
+        try:
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.deleteLater()
+                self.worker = None
+        except Exception as e:
+            logging.warning(f"Error cleaning up duplicate worker: {e}")
 
     def set_ui_enabled(self, enabled):
         self.scan_button.setEnabled(enabled)
