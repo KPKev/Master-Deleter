@@ -751,12 +751,12 @@ class FileDeleterApp(QWidget):
         logging.info(f"RESTORATION: Handling {len(empty_folders)} empty folders - triggering Empty Folder Finder scan only")
         
         # Only trigger empty folder scan, NOT Smart Cleaner scan
-        has_empty_tab = hasattr(self, 'empty_folder_tab') and self.empty_folder_tab
+        has_empty_tab = hasattr(self, 'empty_tab') and self.empty_tab
         logging.info(f"RESTORATION: Empty folder tab available: {has_empty_tab}")
         
         if has_empty_tab:
             # Check if we have a scan path set in the empty folder tab
-            current_path = self.empty_folder_tab.path_input.text()
+            current_path = self.empty_tab.path_input.text()
             logging.info(f"RESTORATION: Current scan path in empty folder tab: '{current_path}'")
             
             if not current_path:
@@ -768,7 +768,7 @@ class FileDeleterApp(QWidget):
                         # Use the parent directory of the first restored folder
                         inferred_path = os.path.dirname(first_folder_path)
                         logging.info(f"RESTORATION: No scan path set, inferring from restored folder: {inferred_path}")
-                        self.empty_folder_tab.path_input.setText(inferred_path)
+                        self.empty_tab.path_input.setText(inferred_path)
                         current_path = inferred_path
                         logging.info(f"RESTORATION: Updated scan path to: '{current_path}'")
                     else:
@@ -784,7 +784,7 @@ class FileDeleterApp(QWidget):
                 # Force trigger the scan - same as clicking "Scan for Empty Folders" button
                 try:
                     logging.info("RESTORATION: About to call start_restoration_scan()...")
-                    self.empty_folder_tab.start_restoration_scan()
+                    self.empty_tab.start_restoration_scan()
                     logging.info("RESTORATION: ✓ Empty folder scan successfully triggered")
                 except Exception as e:
                     logging.error(f"RESTORATION: ✗ Failed to trigger empty folder scan: {e}")
@@ -796,8 +796,8 @@ class FileDeleterApp(QWidget):
                 logging.warning(f"RESTORATION: ✗ Cannot determine valid scan path for empty folder restoration")
                 logging.warning(f"RESTORATION: Current path: '{current_path}', exists: {os.path.exists(current_path) if current_path else False}")
                 self.status_label.setText(f"Restoration complete. {len(empty_folders)} empty folders restored. Please set scan path and rescan to see them.")
-                if hasattr(self.empty_folder_tab, 'refresh_visual_highlighting'):
-                    self.empty_folder_tab.refresh_visual_highlighting()
+                if hasattr(self.empty_tab, 'refresh_visual_highlighting'):
+                    self.empty_tab.refresh_visual_highlighting()
         else:
             logging.error("RESTORATION: ✗ Empty folder tab not available!")
 
@@ -1015,17 +1015,27 @@ class FileDeleterApp(QWidget):
         except Exception as e:
             logging.warning(f"Could not clean up recovery state: {e}")
         
-        # Shutdown threads
-        if self.scanner_thread and self.scanner_thread.isRunning(): self.scanner_thread.quit()
-        if self.deleter_thread and self.deleter_thread.isRunning(): self.deleter_thread.quit()
-        if hasattr(self.dupe_tab, 'dupe_worker') and self.dupe_tab.dupe_worker and self.dupe_tab.dupe_worker.thread().isRunning():
-            self.dupe_tab.dupe_worker.stop()
-        if hasattr(self, 'empty_tab'): self.empty_tab.stop_worker()
-        if self.suggester_thread and self.suggester_thread.isRunning(): self.suggester_thread.quit()
+        # Quick shutdown - force terminate threads without waiting
+        try:
+            if self.scanner_thread and self.scanner_thread.isRunning(): 
+                self.scanner_thread.terminate()
+            if self.deleter_thread and self.deleter_thread.isRunning(): 
+                self.deleter_thread.terminate()
+            if hasattr(self.dupe_tab, 'dupe_worker') and self.dupe_tab.dupe_worker:
+                self.dupe_tab.dupe_worker.stop()
+            if hasattr(self, 'empty_tab'): 
+                self.empty_tab.stop_worker()
+            if self.suggester_thread and self.suggester_thread.isRunning(): 
+                self.suggester_thread.terminate()
+        except Exception as e:
+            logging.warning(f"Error during thread cleanup: {e}")
         
-        # Stop state saving timer
-        if hasattr(self, 'state_timer'):
-            self.state_timer.stop()
+        # Stop state saving timer quickly
+        try:
+            if hasattr(self, 'state_timer'):
+                self.state_timer.stop()
+        except Exception as e:
+            logging.warning(f"Error stopping state timer: {e}")
             
         event.accept()
 
