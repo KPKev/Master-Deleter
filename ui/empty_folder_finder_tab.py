@@ -99,6 +99,9 @@ class EmptyFolderFinderTab(QWidget):
             logging.info(f"Visual highlighting: Applying green highlighting to restored folder {folder_path}")
             item.setBackground(QColor(0, 200, 0))
             item.setForeground(QColor(255, 255, 255))  # White text for visibility
+        else:
+            # Set default text color for normal folders (white for dark theme)
+            item.setForeground(QColor(255, 255, 255))  # White text for visibility on dark background
         
         self.results_model.appendRow(item)
 
@@ -219,9 +222,9 @@ class EmptyFolderFinderTab(QWidget):
                     item.setBackground(QColor(0, 200, 0))
                     item.setForeground(QColor(255, 255, 255))
                 else:
-                    # Clear any existing highlighting
+                    # Clear background highlighting but keep text visible
                     item.setBackground(QColor())
-                    item.setForeground(QColor())
+                    item.setForeground(QColor(255, 255, 255))  # White text for dark background
 
     def on_item_changed(self, item):
         if item.isCheckable():
