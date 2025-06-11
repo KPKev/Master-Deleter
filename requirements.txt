@@ -1,0 +1,6 @@
+PyQt6
+psutil
+scikit-learn
+joblib
+send2trash
+pandas 
