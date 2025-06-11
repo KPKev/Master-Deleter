@@ -711,27 +711,40 @@ class FileDeleterApp(QWidget):
         for file_data in restored_files:
             path = file_data.get('path', '')
             category = file_data.get('category', '')
-            logging.debug(f"RESTORATION: Analyzing restored file - path: {path}, category: {category}, is_dir: {os.path.isdir(path) if path else False}")
-            if category == 'Empty Folders' or (path and os.path.isdir(path)):
+            is_directory = path and os.path.isdir(path) if path else False
+            
+            # Debug logging
+            logging.info(f"RESTORATION: Analyzing restored item:")
+            logging.info(f"  - Path: {path}")
+            logging.info(f"  - Category: {category}")
+            logging.info(f"  - Is directory: {is_directory}")
+            logging.info(f"  - Full data: {file_data}")
+            
+            # Empty folder detection - primarily by category, secondarily by being a directory
+            if category == 'Empty Folders' or (is_directory and not category):
                 empty_folders.append(file_data)
-                logging.info(f"RESTORATION: Classified as empty folder: {path}")
+                logging.info(f"RESTORATION: ✓ Classified as empty folder: {path}")
             else:
                 regular_files.append(file_data)
-                logging.info(f"RESTORATION: Classified as regular file: {path}")
+                logging.info(f"RESTORATION: ✓ Classified as regular file: {path}")
         
         logging.info(f"RESTORATION: Found {len(empty_folders)} empty folders and {len(regular_files)} regular files")
         
         # Handle empty folder restoration separately
         if empty_folders:
+            logging.info(f"RESTORATION: Processing {len(empty_folders)} empty folders for restoration")
             self.handle_empty_folder_restoration(empty_folders)
         
         # Handle regular file restoration with Smart Cleaner scan+refresh
         if regular_files:
+            logging.info(f"RESTORATION: Processing {len(regular_files)} regular files for restoration")
             self.handle_regular_file_restoration(regular_files)
         
-        # If only empty folders were restored, set simple status
+        # If only empty folders were restored, ensure status is updated properly
         if empty_folders and not regular_files:
-            self.status_label.setText(f"Restoration complete. {len(empty_folders)} empty folders restored.")
+            # Give the restoration scan a moment to start, then update status if needed
+            logging.info(f"RESTORATION: Only empty folders restored ({len(empty_folders)}), ensuring scan is triggered")
+            # The status will be updated by the restoration handler
 
     def handle_empty_folder_restoration(self, empty_folders):
         """Handle restoration of empty folders by triggering Empty Folder Finder scan only"""
@@ -757,11 +770,20 @@ class FileDeleterApp(QWidget):
                 logging.info(f"RESTORATION: Triggering empty folder scan on path: {current_path}")
                 # Set status to show we're scanning for restored folders
                 self.status_label.setText(f"Scanning for restored empty folders in {current_path}...")
-                self.empty_folder_tab.start_restoration_scan()
+                
+                # Force trigger the scan - same as clicking "Scan for Empty Folders" button
+                try:
+                    self.empty_folder_tab.start_restoration_scan()
+                    logging.info("RESTORATION: Empty folder scan successfully triggered")
+                except Exception as e:
+                    logging.error(f"RESTORATION: Failed to trigger empty folder scan: {e}")
+                    # Fallback: show message to user
+                    self.status_label.setText(f"Restoration complete. Please click 'Scan for Empty Folders' to see restored folders.")
             else:
-                logging.warning("RESTORATION: Cannot determine valid scan path for empty folder restoration")
+                logging.warning(f"RESTORATION: Cannot determine valid scan path for empty folder restoration. Current path: '{current_path}', exists: {os.path.exists(current_path) if current_path else False}")
                 self.status_label.setText(f"Restoration complete. {len(empty_folders)} empty folders restored. Please set scan path and rescan to see them.")
-                self.empty_folder_tab.refresh_visual_highlighting()
+                if hasattr(self.empty_folder_tab, 'refresh_visual_highlighting'):
+                    self.empty_folder_tab.refresh_visual_highlighting()
 
     def handle_regular_file_restoration(self, regular_files):
         """Handle restoration of regular files with Smart Cleaner scan+refresh"""

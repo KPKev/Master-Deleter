@@ -143,7 +143,14 @@ class EmptyFolderFinderTab(QWidget):
         """Start a scan specifically for restoration purposes"""
         logging.info("RESTORATION: Starting empty folder restoration scan")
         self._restoration_scan_active = True
+        
+        # Ensure we have a valid path
+        scan_path = self.path_input.text()
+        logging.info(f"RESTORATION: Scan path is '{scan_path}', valid: {scan_path and os.path.isdir(scan_path)}")
+        
+        # Force the scan to start
         self.start_scan()
+        logging.info("RESTORATION: start_scan() method called successfully")
 
     def delete_selected(self):
         checked_folders = []
