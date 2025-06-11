@@ -58,6 +58,9 @@ class EmptyFolderFinderTab(QWidget):
         scan_path = self.path_input.text()
         if not scan_path or not os.path.isdir(scan_path):
             QMessageBox.warning(self, "Invalid Path", "Please select a valid folder to scan.")
+            # Clear restoration scan flag if set
+            if hasattr(self, '_restoration_scan_active'):
+                self._restoration_scan_active = False
             return
 
         self.scan_button.setEnabled(False)
@@ -105,15 +108,40 @@ class EmptyFolderFinderTab(QWidget):
         self.scan_button.setEnabled(True)
         self.delete_button.setEnabled(True)
         
-        if folder_count == 0:
-            self.main_window.update_status("No empty folders found.")
+        # Check if this scan was triggered by restoration
+        if hasattr(self, '_restoration_scan_active') and self._restoration_scan_active:
+            self._restoration_scan_active = False
+            if folder_count == 0:
+                self.main_window.update_status("Restoration scan complete. No empty folders found in scanned area.")
+            else:
+                # Count how many of the found folders are recently restored (highlighted)
+                restored_count = 0
+                for i in range(self.results_model.rowCount()):
+                    item = self.results_model.item(i)
+                    if item and item.background().color().name() == '#00c800':  # Green highlighting
+                        restored_count += 1
+                
+                if restored_count > 0:
+                    self.main_window.update_status(f"Restoration scan complete. Found {folder_count} empty folders ({restored_count} restored folders highlighted in green).")
+                else:
+                    self.main_window.update_status(f"Restoration scan complete. Found {folder_count} empty folders.")
         else:
-            self.main_window.update_status(f"Found {folder_count} empty folders.")
+            # Regular scan feedback
+            if folder_count == 0:
+                self.main_window.update_status("No empty folders found.")
+            else:
+                self.main_window.update_status(f"Found {folder_count} empty folders.")
 
         # Refresh highlighting after scan completes (for restoration cases)
         self.refresh_visual_highlighting()
         
         self.main_window.resize_tree_columns(self.results_tree)
+
+    def start_restoration_scan(self):
+        """Start a scan specifically for restoration purposes"""
+        logging.info("RESTORATION: Starting empty folder restoration scan")
+        self._restoration_scan_active = True
+        self.start_scan()
 
     def delete_selected(self):
         checked_folders = []
