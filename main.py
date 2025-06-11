@@ -751,39 +751,55 @@ class FileDeleterApp(QWidget):
         logging.info(f"RESTORATION: Handling {len(empty_folders)} empty folders - triggering Empty Folder Finder scan only")
         
         # Only trigger empty folder scan, NOT Smart Cleaner scan
-        if hasattr(self, 'empty_folder_tab') and self.empty_folder_tab:
+        has_empty_tab = hasattr(self, 'empty_folder_tab') and self.empty_folder_tab
+        logging.info(f"RESTORATION: Empty folder tab available: {has_empty_tab}")
+        
+        if has_empty_tab:
             # Check if we have a scan path set in the empty folder tab
             current_path = self.empty_folder_tab.path_input.text()
+            logging.info(f"RESTORATION: Current scan path in empty folder tab: '{current_path}'")
             
             if not current_path:
                 # Try to infer scan path from restored folder locations
                 if empty_folders:
                     first_folder_path = empty_folders[0].get('path', '')
+                    logging.info(f"RESTORATION: Attempting to infer path from first folder: '{first_folder_path}'")
                     if first_folder_path and os.path.exists(first_folder_path):
                         # Use the parent directory of the first restored folder
                         inferred_path = os.path.dirname(first_folder_path)
                         logging.info(f"RESTORATION: No scan path set, inferring from restored folder: {inferred_path}")
                         self.empty_folder_tab.path_input.setText(inferred_path)
                         current_path = inferred_path
+                        logging.info(f"RESTORATION: Updated scan path to: '{current_path}'")
+                    else:
+                        logging.warning(f"RESTORATION: Cannot infer path - folder doesn't exist: '{first_folder_path}'")
+            
+            logging.info(f"RESTORATION: Final path check - path: '{current_path}', exists: {os.path.exists(current_path) if current_path else False}")
             
             if current_path and os.path.exists(current_path):
-                logging.info(f"RESTORATION: Triggering empty folder scan on path: {current_path}")
+                logging.info(f"RESTORATION: ✓ Valid path found, triggering empty folder scan on: {current_path}")
                 # Set status to show we're scanning for restored folders
                 self.status_label.setText(f"Scanning for restored empty folders in {current_path}...")
                 
                 # Force trigger the scan - same as clicking "Scan for Empty Folders" button
                 try:
+                    logging.info("RESTORATION: About to call start_restoration_scan()...")
                     self.empty_folder_tab.start_restoration_scan()
-                    logging.info("RESTORATION: Empty folder scan successfully triggered")
+                    logging.info("RESTORATION: ✓ Empty folder scan successfully triggered")
                 except Exception as e:
-                    logging.error(f"RESTORATION: Failed to trigger empty folder scan: {e}")
+                    logging.error(f"RESTORATION: ✗ Failed to trigger empty folder scan: {e}")
+                    import traceback
+                    logging.error(f"RESTORATION: Exception traceback: {traceback.format_exc()}")
                     # Fallback: show message to user
                     self.status_label.setText(f"Restoration complete. Please click 'Scan for Empty Folders' to see restored folders.")
             else:
-                logging.warning(f"RESTORATION: Cannot determine valid scan path for empty folder restoration. Current path: '{current_path}', exists: {os.path.exists(current_path) if current_path else False}")
+                logging.warning(f"RESTORATION: ✗ Cannot determine valid scan path for empty folder restoration")
+                logging.warning(f"RESTORATION: Current path: '{current_path}', exists: {os.path.exists(current_path) if current_path else False}")
                 self.status_label.setText(f"Restoration complete. {len(empty_folders)} empty folders restored. Please set scan path and rescan to see them.")
                 if hasattr(self.empty_folder_tab, 'refresh_visual_highlighting'):
                     self.empty_folder_tab.refresh_visual_highlighting()
+        else:
+            logging.error("RESTORATION: ✗ Empty folder tab not available!")
 
     def handle_regular_file_restoration(self, regular_files):
         """Handle restoration of regular files with Smart Cleaner scan+refresh"""
