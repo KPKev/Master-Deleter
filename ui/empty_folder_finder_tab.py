@@ -93,12 +93,11 @@ class EmptyFolderFinderTab(QWidget):
         item.setCheckable(True)
         item.setEditable(False)
         
-        # Apply visual highlighting for restored folders (green)
+        # Apply visual highlighting for restored folders (green) - only text color, no background
         normalized_path = os.path.normpath(folder_path)
         if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
-            logging.info(f"Visual highlighting: Applying green highlighting to restored folder {folder_path}")
-            item.setBackground(QColor(0, 200, 0))
-            item.setForeground(QColor(255, 255, 255))  # White text for visibility
+            logging.info(f"Visual highlighting: Applying green text to restored folder {folder_path}")
+            item.setForeground(QColor(0, 255, 0))  # Green text for restored folders
         else:
             # Set default text color for normal folders (white for dark theme)
             item.setForeground(QColor(255, 255, 255))  # White text for visibility on dark background
@@ -216,14 +215,12 @@ class EmptyFolderFinderTab(QWidget):
                 folder_path = item.text()
                 normalized_path = os.path.normpath(folder_path)
                 
-                # Check for restoration highlighting (green)
+                # Check for restoration highlighting (green text only, no background)
                 if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
-                    logging.info(f"Visual highlighting: Applying green highlighting to restored folder {folder_path}")
-                    item.setBackground(QColor(0, 200, 0))
-                    item.setForeground(QColor(255, 255, 255))
+                    logging.info(f"Visual highlighting: Applying green text to restored folder {folder_path}")
+                    item.setForeground(QColor(0, 255, 0))  # Green text for restored folders
                 else:
-                    # Clear background highlighting but keep text visible
-                    item.setBackground(QColor())
+                    # Normal white text for regular folders
                     item.setForeground(QColor(255, 255, 255))  # White text for dark background
 
     def on_item_changed(self, item):
