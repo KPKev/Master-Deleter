@@ -821,9 +821,24 @@ class FileDeleterApp(QWidget):
         logging.info(f"RESTORATION: Duplicate tab available: {has_dupe_tab}")
         
         if has_dupe_tab:
-            # Check if we have a valid scan path (duplicates use same path as Smart Cleaner)
-            current_scan_path = self.get_scan_path()
+            # Check if we have a valid scan path in the duplicate tab
+            current_scan_path = self.dupe_tab.path_input.text()
             logging.info(f"RESTORATION: Current scan path for duplicates: '{current_scan_path}'")
+            
+            if not current_scan_path:
+                # Try to infer scan path from restored duplicate locations
+                if duplicates:
+                    first_duplicate_path = duplicates[0].get('path', '')
+                    logging.info(f"RESTORATION: Attempting to infer path from first duplicate: '{first_duplicate_path}'")
+                    if first_duplicate_path and os.path.exists(first_duplicate_path):
+                        # Use the parent directory of the first restored duplicate
+                        inferred_path = os.path.dirname(first_duplicate_path)
+                        logging.info(f"RESTORATION: No scan path set, inferring from restored duplicate: {inferred_path}")
+                        self.dupe_tab.path_input.setText(inferred_path)
+                        current_scan_path = inferred_path
+                        logging.info(f"RESTORATION: Updated duplicate scan path to: '{current_scan_path}'")
+                    else:
+                        logging.warning(f"RESTORATION: Cannot infer path - duplicate doesn't exist: '{first_duplicate_path}'")
             
             if current_scan_path and os.path.exists(current_scan_path):
                 logging.info(f"RESTORATION: ✓ Valid path found, triggering duplicate scan on: {current_scan_path}")

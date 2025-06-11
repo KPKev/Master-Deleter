@@ -1,6 +1,7 @@
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QTreeView, QSplitter, QHBoxLayout, QMessageBox, QLabel
+    QWidget, QVBoxLayout, QPushButton, QTreeView, QSplitter, QHBoxLayout, QMessageBox, QLabel,
+    QLineEdit, QFileDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor
@@ -22,6 +23,17 @@ class DuplicateFinderTab(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        
+        # Path selection bar
+        path_bar = QHBoxLayout()
+        path_bar.addWidget(QLabel("Scan Path:"))
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText("Select a folder to scan for duplicates...")
+        self.browse_button = QPushButton("Browse")
+        
+        path_bar.addWidget(self.path_input)
+        path_bar.addWidget(self.browse_button)
+        layout.addLayout(path_bar)
         
         # Top bar
         top_bar = QHBoxLayout()
@@ -57,15 +69,22 @@ class DuplicateFinderTab(QWidget):
         layout.addWidget(splitter)
 
         # Connect signals
+        self.browse_button.clicked.connect(self.browse_folder)
         self.scan_button.clicked.connect(self.start_scan)
         self.delete_button.clicked.connect(self.request_deletion)
         self.keep_newest_button.clicked.connect(self.select_all_but_newest)
         self.tree.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
+    def browse_folder(self):
+        """Open folder dialog to select scan path"""
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Scan for Duplicates")
+        if folder:
+            self.path_input.setText(folder)
+
     def start_scan(self):
-        start_path = self.main_window.get_scan_path()
-        if not start_path:
-            QMessageBox.warning(self, "Path Required", "Please select a valid path to scan in the 'Smart Cleaner' tab.")
+        start_path = self.path_input.text()
+        if not start_path or not os.path.isdir(start_path):
+            QMessageBox.warning(self, "Invalid Path", "Please select a valid folder to scan for duplicates.")
             return
 
         self.set_ui_enabled(False)
@@ -77,12 +96,12 @@ class DuplicateFinderTab(QWidget):
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)
-        self.worker.finished.connect(self.on_scan_finished)
+        self.worker.scan_finished.connect(self.on_scan_finished)
         self.worker.progress_update.connect(self.update_status)
         self.worker.duplicates_found.connect(self.populate_tree)
 
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.scan_finished.connect(self.worker_thread.quit)
+        self.worker.scan_finished.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         
         self.worker_thread.start()
