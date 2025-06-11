@@ -116,6 +116,10 @@ class FileDeleterApp(QWidget):
         
         logging.info("Application initialized successfully.")
 
+    def connect_empty_folder_deletion_finished(self, callback):
+        """Connect empty folder tab to deletion completion events"""
+        self.empty_folder_deletion_callback = callback
+
     def save_recovery_state(self):
         """Save current application state for crash recovery"""
         try:
@@ -673,44 +677,93 @@ class FileDeleterApp(QWidget):
         
         self.refresh_current_view()
         self.quarantine_tab.populate_quarantined_files()
+        
+        # Notify empty folder tab if callback is registered
+        if hasattr(self, 'empty_folder_deletion_callback'):
+            self.empty_folder_deletion_callback(succeeded_items, failed)
+        
         # After deletion, rescan for duplicates as the state has changed
         if self.tabs.currentWidget() == self.dupe_tab:
             self.dupe_tab.start_scan()
 
     def on_files_restored(self, restored_files):
         """
-        Handles file restoration by triggering the exact same sequence that works:
-        Scan + Refresh (programmatically)
+        Handles file restoration with separate logic for empty folders vs regular files
         """
         logging.info(f"RESTORATION: Processing {len(restored_files)} restored files.")
         
         if not restored_files:
             return
             
-        # Track recently restored files for visual highlighting (green in Smart Cleaner)
+        # Track recently restored files for visual highlighting
         self.recently_restored_files.clear()  # Clear previous restorations
         self.recently_restored_files.update(os.path.normpath(file_data.get('path', '')) for file_data in restored_files if file_data.get('path'))
         self.restoration_scans_remaining = 1  # Allow highlighting to survive through 1 scan+refresh cycle
         logging.info(f"Visual tracking: {len(self.recently_restored_files)} files marked as recently restored, allowing 1 scan survival")
-            
+
+        # Update quarantine tab first
+        self.quarantine_tab.populate_quarantined_files()
+        
+        # Separate empty folders from regular files
+        empty_folders = []
+        regular_files = []
+        
+        for file_data in restored_files:
+            path = file_data.get('path', '')
+            category = file_data.get('category', '')
+            if category == 'Empty Folders' or (path and os.path.isdir(path)):
+                empty_folders.append(file_data)
+            else:
+                regular_files.append(file_data)
+        
+        logging.info(f"RESTORATION: Found {len(empty_folders)} empty folders and {len(regular_files)} regular files")
+        
+        # Handle empty folder restoration separately
+        if empty_folders:
+            self.handle_empty_folder_restoration(empty_folders)
+        
+        # Handle regular file restoration with Smart Cleaner scan+refresh
+        if regular_files:
+            self.handle_regular_file_restoration(regular_files)
+        
+        # If only empty folders were restored, set simple status
+        if empty_folders and not regular_files:
+            self.status_label.setText(f"Restoration complete. {len(empty_folders)} empty folders restored.")
+
+    def handle_empty_folder_restoration(self, empty_folders):
+        """Handle restoration of empty folders by triggering Empty Folder Finder scan only"""
+        logging.info(f"RESTORATION: Handling {len(empty_folders)} empty folders - triggering Empty Folder Finder scan only")
+        
+        # Only trigger empty folder scan, NOT Smart Cleaner scan
+        if hasattr(self, 'empty_folder_tab') and self.empty_folder_tab:
+            # Check if we have a scan path set in the empty folder tab
+            current_path = self.empty_folder_tab.path_input.text()
+            if current_path and os.path.exists(current_path):
+                logging.info(f"RESTORATION: Triggering empty folder scan on path: {current_path}")
+                self.empty_folder_tab.start_scan()
+            else:
+                logging.warning("RESTORATION: No valid path in empty folder tab, just refreshing highlighting")
+                self.empty_folder_tab.refresh_visual_highlighting()
+
+    def handle_regular_file_restoration(self, regular_files):
+        """Handle restoration of regular files with Smart Cleaner scan+refresh"""
+        logging.info(f"RESTORATION: Handling {len(regular_files)} regular files - triggering Smart Cleaner scan+refresh")
+        
         # Save current UI state
         selection_model = self.cleaner_tab.category_tree.selectionModel()
         current_index = selection_model.currentIndex()
         selected_category_name = None
         if current_index.isValid():
             selected_category_name = self.cleaner_tab.category_model.itemFromIndex(current_index).text()
-
-        # Update quarantine tab first
-        self.quarantine_tab.populate_quarantined_files()
         
         # Get the current scan path
         current_scan_path = self.get_scan_path()
         if not current_scan_path or not os.path.exists(current_scan_path):
             logging.error("Cannot rescan - no valid scan path available")
-            self.status_label.setText(f"Restoration complete. {len(restored_files)} files restored.")
+            self.status_label.setText(f"Restoration complete. {len(regular_files)} files restored.")
             return
 
-        logging.info(f"RESTORATION: Auto-triggering scan + refresh sequence")
+        logging.info(f"RESTORATION: Auto-triggering Smart Cleaner scan + refresh sequence")
         
         # Step 1: Trigger scan (same as clicking Scan button)
         self.start_scan(current_scan_path)
@@ -719,7 +772,7 @@ class FileDeleterApp(QWidget):
         # We need to wait for scan to complete before refreshing
         self.restoration_callback = lambda: self.complete_restoration_refresh(selected_category_name)
         
-        self.status_label.setText(f"Auto-scanning to detect {len(restored_files)} restored files...")
+        self.status_label.setText(f"Auto-scanning to detect {len(regular_files)} restored files...")
 
     def complete_restoration_refresh(self, selected_category_name):
         """Complete the restoration by refreshing and restoring selection"""

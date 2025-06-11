@@ -1,8 +1,9 @@
 import os
 import logging
+import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLineEdit, QTreeView, QFileDialog, QMessageBox)
-from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor
 from PyQt6.QtCore import Qt, QThread
 
 from core.empty_folder_finder import EmptyFolderFinderWorker
@@ -88,6 +89,14 @@ class EmptyFolderFinderTab(QWidget):
         item = QStandardItem(folder_path)
         item.setCheckable(True)
         item.setEditable(False)
+        
+        # Apply visual highlighting for restored folders (green)
+        normalized_path = os.path.normpath(folder_path)
+        if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
+            logging.info(f"Visual highlighting: Applying green highlighting to restored folder {folder_path}")
+            item.setBackground(QColor(0, 200, 0))
+            item.setForeground(QColor(255, 255, 255))  # White text for visibility
+        
         self.results_model.appendRow(item)
 
     def on_scan_finished(self, folder_count):
@@ -101,11 +110,25 @@ class EmptyFolderFinderTab(QWidget):
         else:
             self.main_window.update_status(f"Found {folder_count} empty folders.")
 
-
+        # Refresh highlighting after scan completes (for restoration cases)
+        self.refresh_visual_highlighting()
+        
         self.main_window.resize_tree_columns(self.results_tree)
 
     def delete_selected(self):
-        checked_folders = [self.results_model.item(i).text() for i in range(self.results_model.rowCount()) if self.results_model.item(i).checkState() == Qt.CheckState.Checked]
+        checked_folders = []
+        for i in range(self.results_model.rowCount()):
+            item = self.results_model.item(i)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                folder_path = item.text()
+                checked_folders.append({
+                    'path': folder_path,
+                    'size': 0,  # Folders have 0 size for deletion purposes
+                    'type': 'dir',  # Mark as directory
+                    'category': 'Empty Folders',  # Category for tracking
+                    'name': os.path.basename(folder_path)
+                })
+        
         if not checked_folders:
             QMessageBox.warning(self, "No Folders Selected", "Please select the empty folders you wish to delete.")
             return
@@ -114,33 +137,63 @@ class EmptyFolderFinderTab(QWidget):
                                      f"Are you sure you want to delete {len(checked_folders)} empty folders?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.No: return
+        if reply == QMessageBox.StandardButton.No: 
+            return
         
-        # Use main window's recycle bin setting
-        use_recycle_bin = self.main_window.recycle_bin_checkbox.isChecked()
-        self.deleter_thread = QThread()
-        self.deleter = Deleter([{'path': p, 'size': 0} for p in checked_folders], use_recycle_bin=use_recycle_bin)
-        self.deleter.moveToThread(self.deleter_thread)
+        logging.info(f"Empty folder deletion: Starting deletion of {len(checked_folders)} folders")
         
-        self.deleter_thread.started.connect(self.deleter.run)
-        self.deleter.progress_update.connect(self.main_window.update_status)
-        self.deleter.deletion_finished.connect(self.on_deletion_finished)
-        self.deleter.deletion_finished.connect(self.deleter_thread.quit)
-        self.deleter.destroyed.connect(lambda: setattr(self, 'deleter', None))
-        self.deleter_thread.finished.connect(self.deleter.deleteLater)
-        self.deleter_thread.finished.connect(self.deleter_thread.deleteLater)
-        self.deleter_thread.destroyed.connect(lambda: setattr(self, 'deleter_thread', None))
+        # Use the main window's robust deletion system
+        self.main_window.delete_selected_files(checked_folders)
+        # Connect to the main window's deletion completion handler
+        self.main_window.connect_empty_folder_deletion_finished(self.on_deletion_finished)
 
-        self.deleter_thread.start()
-
-    def on_deletion_finished(self):
-        self.main_window.update_status("Empty folder deletion finished. Please rescan to verify.")
+    def on_deletion_finished(self, succeeded_items, failed_items):
+        """Handle completion of empty folder deletion"""
+        succeeded_count = len(succeeded_items)
+        failed_count = len(failed_items)
+        
+        if succeeded_count > 0:
+            self.main_window.update_status(f"Deleted {succeeded_count} empty folders successfully.")
+            
+            # Remove successfully deleted folders from the display
+            succeeded_paths = {item['path'] for item in succeeded_items}
+            rows_to_remove = []
+            
+            for i in range(self.results_model.rowCount()):
+                item = self.results_model.item(i)
+                if item and item.text() in succeeded_paths:
+                    rows_to_remove.append(i)
+            
+            # Remove rows in reverse order to maintain indices
+            for row in reversed(rows_to_remove):
+                self.results_model.removeRow(row)
+                
+        if failed_count > 0:
+            self.main_window.update_status(f"Failed to delete {failed_count} folders. Check logs for details.")
+            
         # Re-enable the delete button if there are still items
         self.delete_button.setEnabled(self.results_model.rowCount() > 0)
-        # Clear the tree since we don't know which succeeded
-        self.results_model.clear()
-        self.main_window.update_status("Deletion complete. Rescan to see updated list of empty folders.")
+        
+        if succeeded_count > 0 and self.results_model.rowCount() == 0:
+            self.main_window.update_status("All empty folders deleted successfully!")
 
+    def refresh_visual_highlighting(self):
+        """Refresh visual highlighting for all displayed folders"""
+        for i in range(self.results_model.rowCount()):
+            item = self.results_model.item(i)
+            if item:
+                folder_path = item.text()
+                normalized_path = os.path.normpath(folder_path)
+                
+                # Check for restoration highlighting (green)
+                if hasattr(self.main_window, 'recently_restored_files') and normalized_path in self.main_window.recently_restored_files:
+                    logging.info(f"Visual highlighting: Applying green highlighting to restored folder {folder_path}")
+                    item.setBackground(QColor(0, 200, 0))
+                    item.setForeground(QColor(255, 255, 255))
+                else:
+                    # Clear any existing highlighting
+                    item.setBackground(QColor())
+                    item.setForeground(QColor())
 
     def on_item_changed(self, item):
         if item.isCheckable():
